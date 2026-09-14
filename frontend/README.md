@@ -1,8 +1,5 @@
-# Wedding Chain MVP 기술 문서
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-[프로젝트 소개 및 빠른 실행](../README.md) · [프론트엔드 구현](app/page.tsx) · [스마트컨트랙트](../contracts/WeddingMarketMVP.sol)
-
-이 문서는 프론트엔드 구현과 네트워크 설정, 테스트 절차를 다룹니다. 프로젝트는 [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app)으로 생성되었습니다.
 
 ## Wedding Chain MVP 실행 및 검증
 
@@ -10,9 +7,7 @@
 `src/app/`은 사용하지 않습니다. Next.js 16, TypeScript, Tailwind CSS와 ethers.js 6을 사용합니다.
 루트 `package.json`에는 ethers 의존성만 있고, 웹 실행 명령은 `frontend/package.json`에 있습니다.
 스마트컨트랙트는 업체 등록, 상품·가격 이력, 예약 요청·승인·완료 기능을 제공하며 결제는 포함하지 않습니다.
-현재 화면은 MetaMask 연결, 소비자의 Product #1 조회·예약 요청, 업체의 Booking #2 승인과 해당 예약 buyer의 이용 완료 등록을 구현합니다.
-
-`page.tsx`의 `TARGET_BOOKING_ID`는 `2`입니다. 새로운 예약을 생성해도 승인·이용 완료 화면의 대상 ID는 자동으로 변경되지 않습니다.
+현재 화면은 MetaMask 연결, 소비자의 Product #1 조회·예약 요청과 업체의 예약 목록·승인을 구현합니다.
 
 프로젝트 루트에서 실행합니다. 의존성이 이미 설치되어 있다면 `npm ci`는 생략할 수 있습니다.
 
@@ -39,7 +34,7 @@ npm run dev
 ### 정상 동작 테스트
 
 1. **MetaMask 지갑 연결**을 클릭하고 MetaMask에서 계정 접근을 승인합니다.
-2. MetaMask에서 Kaia Kairos Testnet을 선택합니다. 화면에 `Kaia Kairos Testnet (Chain ID: 1001)`과 연결 주소가 표시되는지 확인합니다. Product #1의 vendor와 같은 계정에는 **업체 예약 관리**, 다른 계정에는 기존 상품 조회용 **소비자 예약** 화면이 표시됩니다. Booking #2의 buyer에게는 **소비자 예약 관리**도 표시됩니다.
+2. MetaMask에서 Kaia Kairos Testnet을 선택합니다. 화면에 `Kaia Kairos Testnet (Chain ID: 1001)`과 연결 주소가 표시되는지 확인합니다. 등록된 업체가 아닌 계정에는 **소비자 예약**, 등록된 업체 계정에는 **업체 예약 관리**가 자동 표시됩니다.
 3. **Studio 상품 불러오기**를 클릭합니다. 화면에서 `getProduct(1)`의 실제 응답을 확인합니다.
 
 2026-09-06 공개 RPC 조회 결과:
@@ -67,7 +62,7 @@ Secret Recovery Phrase, private key, GitHub PAT 또는 `.env` 설정은 필요�
 
 상품 대금은 결제하지 않으며 트랜잭션 가스비만 발생합니다. 컨트랙트는 `createBooking` 실행 시점의 가격을 저장하므로, 확인 화면 이후 업체가 가격을 바꾸면 실제 기록된 가격이 달라질 수 있습니다. 프론트엔드의 전송 전 재검사만으로 이 차이를 완전히 막을 수 없으며, 성공 화면은 이벤트에 기록된 실제 예약 가격을 표시합니다.
 
-- Product #1의 vendor 계정에는 상품 조회·예약 버튼 대신 업체 예약 관리 화면이 표시됩니다. 소비자 화면의 inactive 상품에는 예약 버튼이 비활성화됩니다.
+- 등록된 업체 계정에는 소비자의 상품 조회·예약 버튼 대신 업체 예약 관리 화면이 표시됩니다. 소비자 화면의 inactive 상품에는 예약 버튼이 비활성화됩니다.
 - MetaMask 승인을 거절하면 오류 안내 후 다시 시도할 수 있습니다.
 - 가스비 부족 또는 컨트랙트 조건 위반 시 오류 안내가 표시됩니다.
 - 계정·네트워크를 바꾸면 예약 확인 화면을 닫고 상품을 다시 조회하도록 합니다. 이미 전송한 거래의 해시와 결과는 원래 소비자 주소와 함께 유지합니다.
@@ -78,51 +73,29 @@ Secret Recovery Phrase, private key, GitHub PAT 또는 `.env` 설정은 필요�
 
 ### 업체 화면과 예약 승인 테스트
 
-업체 화면은 `getProduct(1).vendor`와 연결 주소를 대소문자 구분 없이 비교해 표시합니다. `getVendor` 등록 여부로 화면 역할을 판별하지 않습니다. RPC 오류는 소비자 계정으로 처리하지 않고 재시도 안내를 표시합니다.
+계정 역할은 `getVendor(연결 주소)`로 조회합니다. 등록된 업체는 예약이 없어도 업체 화면으로 이동하며, 업체 등록이 없다는 `Vendor not found` 응답을 받은 계정은 소비자 화면으로 이동합니다. RPC 오류는 소비자 계정으로 처리하지 않고 재시도 안내를 표시합니다. 상품 판매자 주소를 하드코딩해 역할을 정하지 않습니다.
 
-1. MetaMask를 Product #1의 **업체 계정**으로 전환합니다. 계정 변경을 감지하면 이전 계정의 화면을 지우고 업체 화면을 자동으로 불러옵니다.
-2. `getBooking(2)`로 Booking ID, buyer, vendor, productId, bookedPriceKRW, status와 요청 시각을 조회합니다. 상품 ID와 vendor가 Product #1과 일치하는지도 검사합니다. **Booking #2 새로고침**으로 다시 조회할 수 있습니다.
-3. Booking #2가 `Requested (0)`이면 **예약 승인** 버튼이 표시됩니다. 카드에 표시된 예약 정보와 상태 변경, 가스비 안내를 확인하고 버튼을 누릅니다.
-4. 앱이 계정·Chain ID 1001·최신 상품 vendor·예약 소유자·최신 상태를 다시 검사한 뒤, 연결 업체 signer로 `acceptBooking(2)`를 실행합니다. MetaMask에서 거래를 검토하고 승인합니다.
-5. 거래 해시가 표시됩니다. 성공한 영수증에서 해당 컨트랙트의 `BookingStatusChanged` 이벤트와 Booking ID 2, `Requested (0) → Accepted (1)` 전환을 확인한 뒤 예약을 다시 조회합니다.
+1. 소비자 계정으로 새 예약을 만듭니다. 기존 예약을 승인하려면 해당 예약이 `Requested`인지 확인합니다.
+2. MetaMask에서 해당 상품의 **업체 계정**으로 전환합니다. 계정 변경을 감지하면 이전 상품·목록·확인 화면을 지우고 업체 화면을 자동으로 불러옵니다.
+3. `getVendorBookingIds(업체 주소)`와 `getBooking(예약 ID)`로 이 업체에 들어온 모든 예약을 조회합니다. 목록에는 Booking ID, Product ID, 소비자 주소, 예약 당시 가격, 요청 시각과 상태가 표시됩니다. 신규 예약은 **예약 목록 새로고침**으로 불러옵니다.
+4. `Requested` 예약의 **예약 승인**을 누릅니다. 예약 ID·소비자·업체·금액·네트워크와 `Requested → Accepted` 변경을 확인합니다. **승인 취소**는 MetaMask 요청 없이 확인 화면을 닫습니다.
+5. **확인하고 MetaMask에서 업체 승인**을 누릅니다. 앱이 계정·Chain ID 1001·예약 소유자·최신 상태를 다시 확인하고, 연결 업체 signer로 `acceptBooking(bookingId)`를 실행합니다. 테스트 KAIA 가스비와 요청을 MetaMask에서 확인하고 승인합니다.
+6. 거래 해시가 즉시 표시됩니다. 성공한 영수증에서 해당 컨트랙트의 `BookingStatusChanged` 이벤트와 예약 ID, `Requested → Accepted` 전환을 확인한 뒤 목록을 다시 조회합니다. 승인된 예약에는 승인 버튼이 사라집니다.
 
-`Accepted`, `Completed`, `Cancelled` 예약에는 승인 버튼이 없습니다. 현재 컨트랙트의 `acceptBooking`은 검증 플래그와 관계없이 해당 예약 업체에게 `Requested` 예약 승인을 허용합니다.
+`Accepted`, `Completed`, `Cancelled` 예약에는 승인 버튼이 없습니다. 등록된 업체의 검증 상태도 표시하며, 현재 컨트랙트의 `acceptBooking`은 검증 플래그와 관계없이 해당 예약 업체에게 기존 `Requested` 예약 승인을 허용합니다.
 
-기존 테스트 기록: 2026-09-06 기능 추가 중 공개 RPC에서 Booking #1은 Product #1, 900,000원, `Completed` 상태로 확인했습니다. 이 기록은 과거 조회 결과이며 현재 관리 화면의 대상은 Booking #2입니다. Booking #2가 이미 처리되었다면 새 예약을 생성하는 것만으로 같은 화면의 승인 테스트를 반복할 수 없습니다.
+2026-09-06 기능 추가 중 공개 RPC로 확인한 업체 `0xcC5A6829B50DF6dC5266d76f43cc35B73138aC0F`의 예약은 Booking #1, Product #1, 900,000원, `Completed` 상태였습니다. 이 데이터는 코드에 고정하지 않습니다. 이 예약에 승인 버튼이 없는 것은 정상이며, 새 소비자 예약으로 승인 흐름을 테스트할 수 있습니다.
 
 추가로 확인할 예외 상황:
 
-- Product #1의 vendor에서 다른 계정으로 전환하면 업체 예약 관리 영역이 사라집니다.
-- Product #1의 vendor가 아닌 계정에는 예약 승인 버튼이 표시되지 않습니다.
-- Booking #2가 없거나 상품·vendor가 일치하지 않으면 조회 오류를 표시합니다.
-- 카드 표시 이후 소비자가 취소했거나 이미 승인된 예약은 전송 전 재조회에서 차단됩니다.
+- 업체 A에서 업체 B 또는 소비자로 전환하면 A의 예약 목록·승인 확인 화면이 남지 않습니다.
+- 업체가 아닌 소비자에게는 예약 승인 버튼이 표시되지 않습니다.
+- 예약이 없는 업체에는 빈 목록 안내가 표시됩니다.
+- 확인 화면 이후 소비자가 취소했거나 이미 승인된 예약은 전송 전 재조회에서 차단됩니다.
 - 서명 거절·가스비 부족·실행 실패 시 성공으로 표시하지 않습니다.
 - 거래 전송 중에는 중복 클릭을 막습니다. 60초 안에 영수증을 확인하지 못하면 해시를 유지하고 **승인 결과 다시 확인**을 제공합니다. 이것은 새 승인 거래를 보내지 않습니다.
 - 이미 전송한 소비자 예약·업체 승인 거래의 결과 영역은 계정 전환 후에도 원래 실행 주소와 함께 유지합니다. 역할별 작업 버튼과 구분되며, 결과 재조회는 읽기 전용입니다.
 - MetaMask에서 거래를 가속·취소하여 다른 해시로 대체하거나 페이지를 새로고침한 경우에는 MetaMask 활동 내역과 탐색기에서 거래를 확인합니다.
-
-### 소비자 이용 완료 테스트
-
-1. MetaMask를 Booking #2의 **buyer 계정**으로 전환합니다. `getBooking(2)`로 조회한 buyer와 일치할 때만 **소비자 예약 관리**가 표시됩니다. 기존 상품 조회 UI도 사용할 수 있습니다.
-2. Booking ID, buyer, vendor, 상품 ID, 예약 가격과 현재 상태를 확인합니다. **내 Booking #2 새로고침**으로 상태를 다시 읽을 수 있습니다.
-3. `Accepted (1)`일 때만 **이용 완료** 버튼이 표시됩니다. 서비스를 이용했다면 버튼을 누릅니다.
-4. 앱이 실제 MetaMask 계정·Chain ID·Booking #2의 buyer·최신 상태를 확인한 뒤 소비자 signer로 `completeBooking(2)`를 실행합니다. MetaMask에서 가스비와 거래를 검토하고 승인합니다.
-5. 성공 영수증에서 해당 컨트랙트의 `BookingStatusChanged` 이벤트와 Booking ID 2, `Accepted (1) → Completed (2)` 전환을 확인합니다. 결과에 Booking ID, 거래 해시와 `Completed (2)`를 표시하고 예약 상태를 다시 조회합니다.
-
-검증할 예외 상황:
-
-- buyer가 아닌 계정에는 소비자 예약 관리와 이용 완료 버튼이 표시되지 않습니다.
-- `Requested`, `Completed`, `Cancelled` 상태에는 이용 완료 버튼이 없습니다.
-- 클릭 직전에 예약 상태가 달라졌다면 재조회 결과를 표시하고 전송을 중단합니다.
-- 서명 거절·가스비 부족·실행 실패를 성공으로 표시하지 않으며, 중복 클릭을 차단합니다.
-- 영수증 조회가 실패하거나 60초 대기 시간이 지나면 해시를 유지하고 **이용 완료 결과 다시 확인**으로 같은 거래를 재조회합니다.
-- 전송 후 계정을 바꾸어도 원래 buyer 주소와 거래 결과는 유지합니다. 현재 계정의 관리 영역은 다시 판별합니다.
-
-### MetaMask 상태 동기화
-
-UI의 네트워크 판별은 `window.ethereum.request({ method: "eth_chainId" })`의 직접 응답을 `bigint`로 변환해 `1001`과 비교합니다. 페이지 진입·연결 승인·계정 변경·탭 복귀 시 새로 읽습니다.
-
-`chainChanged`는 즉시 화면에 반영하고 `accountsChanged`는 주소 갱신과 체인 재조회를 수행합니다. 이전 계정·네트워크에서 시작한 요청이나 오래된 동기화 응답은 버립니다. 늦게 주입되는 MetaMask의 초기화 이벤트를 처리하고, 컴포넌트 정리 시 리스너를 제거합니다.
 
 ### 예외 상황 테스트
 
@@ -181,13 +154,3 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
-## 문서 변경 커밋 예시
-
-프로젝트 루트에서 루트 README를 커밋하고 푸시하는 명령입니다. 이 기술 문서도 함께 변경했다면 `git add frontend/README.md`로 추가합니다.
-
-```bash
-git add README.md
-git commit -m "docs: add project README"
-git push
-```
