@@ -30,7 +30,7 @@ import type {
 // =========================================================
 
 const CONTRACT_ADDRESS =
-  "0x38737d4B70Ec1a6857A3593Bc1C073D791f0D8b5";
+  "0xF397f508D109491b5B61d24C1095EC29c9f0AfCE";
 
 const KAIROS_RPC_URL =
   "https://public-en-kairos.node.kaia.io";
@@ -52,6 +52,7 @@ const CONTRACT_ABI = [
   "function requestVendorRegistration(uint8 category, string metadataURI)",
   "function approveVendor(address vendorWallet)",
   "function rejectVendor(address vendorWallet)",
+  "function revokeVendor(address vendorWallet)",
   "function getVendorApplication(address vendorWallet) view returns (tuple(address wallet, uint8 category, string metadataURI, uint8 status, uint256 requestedAt, uint256 reviewedAt, bool exists))",
   "function isVerifiedVendor(address vendorWallet) view returns (bool)",
 
@@ -59,15 +60,29 @@ const CONTRACT_ABI = [
   "function createAgreement(address buyer, bytes32 documentHash, uint256 amountKRW) returns (uint256)",
   "function proposeAgreementVersion(uint256 agreementId, bytes32 newDocumentHash, uint256 newAmountKRW) returns (uint256)",
   "function approveAgreementVersion(uint256 agreementId, uint256 version)",
+  "function rejectAgreementVersion(uint256 agreementId, uint256 version)",
+  "function cancelPendingAgreementVersion(uint256 agreementId, uint256 version)",
 
   // Read
   "function getAgreement(uint256 agreementId) view returns (tuple(uint256 id, address buyer, address vendor, uint256 activeVersion, uint256 latestVersion, uint8 status, uint256 createdAt, bool exists))",
 
-  "function getAgreementVersion(uint256 agreementId, uint256 version) view returns (tuple(uint256 version, bytes32 documentHash, uint256 amountKRW, bool buyerApproved, bool vendorApproved, uint256 createdAt, bool exists))",
+  "function getAgreementVersion(uint256 agreementId, uint256 version) view returns (tuple(uint256 version, bytes32 documentHash, uint256 amountKRW, bool buyerApproved, bool vendorApproved, uint8 status, address resolvedBy, uint256 resolvedAt, uint256 createdAt, bool exists))",
 
   "function getBuyerAgreementIds(address buyer) view returns (uint256[])",
   "function getVendorAgreementIds(address vendor) view returns (uint256[])",
   "function getAgreementCount() view returns (uint256)",
+
+  // Events
+  "event VendorRegistrationRequested(address indexed vendor, uint8 category, string metadataURI, uint256 requestedAt)",
+  "event VendorApproved(address indexed vendor, uint256 reviewedAt)",
+  "event VendorRejected(address indexed vendor, uint256 reviewedAt)",
+  "event VendorRevoked(address indexed vendor, uint256 revokedAt)",
+  "event AgreementCreated(uint256 indexed agreementId, address indexed buyer, address indexed vendor, uint256 version, bytes32 documentHash, uint256 amountKRW, uint256 createdAt)",
+  "event AgreementVersionProposed(uint256 indexed agreementId, uint256 indexed previousActiveVersion, uint256 indexed newVersion, bytes32 documentHash, uint256 amountKRW, uint256 proposedAt)",
+  "event AgreementVersionApproved(uint256 indexed agreementId, uint256 indexed version, address indexed approver, bool buyerApproved, bool vendorApproved, uint256 approvedAt)",
+  "event AgreementActivated(uint256 indexed agreementId, uint256 indexed version, uint256 activatedAt)",
+  "event AgreementVersionRejected(uint256 indexed agreementId, uint256 indexed version, address indexed rejectedBy, uint256 activeVersionAfterRejection, uint256 rejectedAt)",
+  "event AgreementVersionCancelled(uint256 indexed agreementId, uint256 indexed version, address indexed cancelledBy, uint256 activeVersionAfterCancellation, uint256 cancelledAt)",
 ];
 
 // =========================================================
@@ -109,6 +124,9 @@ type AgreementVersion = {
   amountKRW: string;
   buyerApproved: boolean;
   vendorApproved: boolean;
+  status: number;
+  resolvedBy: string;
+  resolvedAt: string;
   createdAt: string;
   exists: boolean;
 };
@@ -140,6 +158,7 @@ const VENDOR_STATUS_NAMES = [
   "Pending",
   "Verified",
   "Rejected",
+  "Suspended",
 ];
 
 const AGREEMENT_STATUS_NAMES = [
@@ -147,6 +166,14 @@ const AGREEMENT_STATUS_NAMES = [
   "Pending Approval",
   "Active",
   "Change Pending",
+  "Cancelled",
+];
+
+const AGREEMENT_VERSION_STATUS_NAMES = [
+  "None",
+  "Pending",
+  "Active",
+  "Rejected",
   "Cancelled",
 ];
 
@@ -544,6 +571,16 @@ export default function AgreementDApp() {
             vendorApproved:
               versionRaw.vendorApproved,
 
+            status: Number(
+              versionRaw.status
+            ),
+
+            resolvedBy:
+              versionRaw.resolvedBy,
+
+            resolvedAt:
+              versionRaw.resolvedAt.toString(),
+
             createdAt:
               versionRaw.createdAt.toString(),
 
@@ -925,6 +962,24 @@ export default function AgreementDApp() {
     }
   }
 
+  async function revokeVendor() {
+    if (!vendorLookupResult) {
+      return;
+    }
+
+    const success = await runTransaction(
+      (contract) =>
+        contract.revokeVendor(
+          vendorLookupResult.wallet
+        ),
+      "업체 자격을 정지했습니다. 기존 Active 계약은 유지됩니다."
+    );
+
+    if (success) {
+      await lookupVendor();
+    }
+  }
+
   function generateV1Hash() {
     if (
       !agreementText.trim()
@@ -1097,6 +1152,34 @@ export default function AgreementDApp() {
         ),
 
       `Agreement #${agreementId} V${version} 승인이 완료되었습니다.`
+    );
+  }
+
+  async function rejectAgreementVersion(
+    agreementId: number,
+    version: number
+  ) {
+    await runTransaction(
+      (contract) =>
+        contract.rejectAgreementVersion(
+          agreementId,
+          version
+        ),
+      `Agreement #${agreementId} V${version} 거절이 완료되었습니다.`
+    );
+  }
+
+  async function cancelAgreementVersion(
+    agreementId: number,
+    version: number
+  ) {
+    await runTransaction(
+      (contract) =>
+        contract.cancelPendingAgreementVersion(
+          agreementId,
+          version
+        ),
+      `Agreement #${agreementId} V${version} 철회가 완료되었습니다.`
     );
   }
 
@@ -1459,6 +1542,23 @@ export default function AgreementDApp() {
                       업체 거절
                     </button>
                   </div>
+                )}
+
+                {vendorLookupResult.status ===
+                  2 && (
+                  <button
+                    onClick={
+                      revokeVendor
+                    }
+                    disabled={
+                      loading
+                    }
+                    style={
+                      styles.dangerButton
+                    }
+                  >
+                    업체 자격 정지
+                  </button>
                 )}
               </div>
             )}
@@ -1905,6 +2005,15 @@ export default function AgreementDApp() {
                   onApprove={
                     approveAgreementVersion
                   }
+                  onReject={
+                    rejectAgreementVersion
+                  }
+                  onCancel={
+                    cancelAgreementVersion
+                  }
+                  verifiedVendor={
+                    verifiedVendor
+                  }
                 />
               )
             )}
@@ -1944,6 +2053,9 @@ function AgreementCard({
   account,
   loading,
   onApprove,
+  onReject,
+  onCancel,
+  verifiedVendor,
 }: {
   agreement: AgreementData;
   account: string;
@@ -1952,6 +2064,15 @@ function AgreementCard({
     agreementId: number,
     version: number
   ) => void;
+  onReject: (
+    agreementId: number,
+    version: number
+  ) => void;
+  onCancel: (
+    agreementId: number,
+    version: number
+  ) => void;
+  verifiedVendor: boolean;
 }) {
   const accountLower =
     account.toLowerCase();
@@ -1987,6 +2108,7 @@ function AgreementCard({
   const vendorCanApprove =
     Boolean(
       isVendor &&
+        verifiedVendor &&
         latestVersion &&
         !latestVersion.vendorApproved &&
         (agreement.status ===
@@ -1994,6 +2116,20 @@ function AgreementCard({
           agreement.status ===
             3)
     );
+
+  const canReject = Boolean(
+    isBuyer &&
+      latestVersion?.status === 1 &&
+      (agreement.status === 1 ||
+        agreement.status === 3)
+  );
+
+  const canCancel = Boolean(
+    isVendor &&
+      latestVersion?.status === 1 &&
+      (agreement.status === 1 ||
+        agreement.status === 3)
+  );
 
   return (
     <article
@@ -2153,6 +2289,34 @@ function AgreementCard({
                 />
 
                 <DataRow
+                  label="Version Status"
+                  value={
+                    AGREEMENT_VERSION_STATUS_NAMES[
+                      version.status
+                    ] ?? "Unknown"
+                  }
+                />
+
+                <DataRow
+                  label="Resolved By"
+                  value={
+                    version.resolvedBy ===
+                    "0x0000000000000000000000000000000000000000"
+                      ? "-"
+                      : shortAddress(
+                          version.resolvedBy
+                        )
+                  }
+                />
+
+                <DataRow
+                  label="Resolved At"
+                  value={formatDate(
+                    version.resolvedAt
+                  )}
+                />
+
+                <DataRow
                   label="Created At"
                   value={formatDate(
                     version.createdAt
@@ -2172,7 +2336,9 @@ function AgreementCard({
       </div>
 
       {(buyerCanApprove ||
-        vendorCanApprove) &&
+        vendorCanApprove ||
+        canReject ||
+        canCancel) &&
         latestVersion && (
           <div
             style={{
@@ -2192,26 +2358,59 @@ function AgreementCard({
               입니다.
             </p>
 
-            <button
-              onClick={() =>
-                onApprove(
-                  agreement.id,
+            {(buyerCanApprove ||
+              vendorCanApprove) && (
+              <button
+                onClick={() =>
+                  onApprove(
+                    agreement.id,
+                    agreement.latestVersion
+                  )
+                }
+                disabled={
+                  loading
+                }
+                style={
+                  styles.primaryButton
+                }
+              >
+                V
+                {
                   agreement.latestVersion
-                )
-              }
-              disabled={
-                loading
-              }
-              style={
-                styles.primaryButton
-              }
-            >
-              V
-              {
-                agreement.latestVersion
-              }{" "}
-              계약 승인
-            </button>
+                }{" "}
+                계약 승인
+              </button>
+            )}
+
+            {canReject && (
+              <button
+                onClick={() =>
+                  onReject(
+                    agreement.id,
+                    agreement.latestVersion
+                  )
+                }
+                disabled={loading}
+                style={styles.dangerButton}
+              >
+                V{agreement.latestVersion} 계약 버전 거절
+              </button>
+            )}
+
+            {canCancel && (
+              <button
+                onClick={() =>
+                  onCancel(
+                    agreement.id,
+                    agreement.latestVersion
+                  )
+                }
+                disabled={loading}
+                style={styles.secondaryButton}
+              >
+                V{agreement.latestVersion} 제안 철회
+              </button>
+            )}
           </div>
         )}
     </article>
